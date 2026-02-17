@@ -58,8 +58,16 @@ jobs:
 
       - name: Create Liquibase directories
         run: |
-          mkdir -p changelogs
-          chmod -R 777 scripts changelogs
+          mkdir -p changelogs drivers
+          chmod -R 777 scripts changelogs drivers
+
+      - name: Download DB2 JDBC Driver
+        run: |
+          # Download db2jcc4.jar from Maven Central
+          echo "Downloading DB2 JDBC driver..."
+          curl -o drivers/db2jcc4.jar https://repo1.maven.org/maven2/com/ibm/db2/jcc/11.5.8.0/jcc-11.5.8.0.jar
+          chmod 644 drivers/db2jcc4.jar
+          ls -l drivers/
 
       - name: Wait for DB2 to be ready
         timeout-minutes: 10
@@ -92,6 +100,7 @@ jobs:
           echo "Seeding DB2 with legacy data..."
           docker run --network host --rm \
             -v ${{ github.workspace }}/scripts:/scripts \
+            -v ${{ github.workspace }}/drivers:/liquibase/lib \
             liquibase/liquibase:latest \
             --url="jdbc:db2://localhost:50000/${{ env.DB2_DB_NAME }}" \
             --username=db2inst1 \
@@ -104,6 +113,7 @@ jobs:
           echo "Reverse engineering DB2 schema..."
           docker run --network host --rm \
             -v ${{ github.workspace }}/changelogs:/liquibase/changelogs \
+            -v ${{ github.workspace }}/drivers:/liquibase/lib \
             liquibase/liquibase:latest \
             --url="jdbc:db2://localhost:50000/${{ env.DB2_DB_NAME }}" \
             --username=db2inst1 \

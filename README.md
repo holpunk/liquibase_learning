@@ -35,7 +35,13 @@ You can also run this simulation on your local machine if you have Docker instal
     ```
     *You can adjust the passwords in `.env` if desired.*
 
-2.  **Start the databases**:
+2.  **Download Drivers**:
+    The DB2 driver is not included in the default Liquibase image due to licensing. Download it using the provided script:
+    ```bash
+    ./scripts/download-driver.sh
+    ```
+
+3.  **Start the databases**:
     ```bash
     docker-compose up -d
     ```

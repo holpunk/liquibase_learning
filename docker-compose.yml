@@ -43,6 +43,7 @@ services:
     volumes:
       - ./changelogs:/liquibase/changelogs
       - ./scripts:/liquibase/scripts
+      - ./drivers:/liquibase/lib
     # Example command (doesn't run automatically)
     command: --help
     depends_on:
