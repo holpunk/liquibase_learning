@@ -1,0 +1,152 @@
+name: Simulate DB2 to RDS Migration via Liquibase
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# Environment variables (Secrets should be configured in Repo Settings)
+# For this simulation, we provide defaults if secrets are missing, 
+# but in a real scenario, you MUST use secrets.
+env:
+  # Source DB (DB2)
+  DB2_PASSWORD: ${{ secrets.DB2_PASSWORD || 'password' }}
+  DB2_DB_NAME: ${{ secrets.DB2_DB_NAME || 'testdb' }}
+  
+  # Target DB (Postgres)
+  POSTGRES_USER: ${{ secrets.POSTGRES_USER || 'postgres' }}
+  POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'password' }}
+  POSTGRES_DB: ${{ secrets.POSTGRES_DB || 'targetdb' }}
+
+jobs:
+  simulate-db2-to-rds:
+    runs-on: ubuntu-latest
+
+    services:
+      # Source Database: IBM DB2 (Simulating On-Premise)
+      db2:
+        image: icr.io/db2_community/db2
+        env:
+          LICENSE: accept
+          DB2INST1_PASSWORD: ${{ env.DB2_PASSWORD }}
+          DBNAME: ${{ env.DB2_DB_NAME }}
+          # Optimizations for faster startup in CI
+          AUTOCONFIG: false
+          ARCHIVE_LOGS: false
+        ports:
+          - 50000:50000
+        options: --privileged
+
+      # Target Database: PostgreSQL (Simulating AWS RDS)
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Create Liquibase directories
+        run: |
+          mkdir -p changelogs
+          chmod -R 777 scripts changelogs
+
+      - name: Wait for DB2 to be ready
+        timeout-minutes: 10
+        run: |
+          echo "Waiting for DB2 to be available on port 50000..."
+          # Function to check if port is open
+          wait_for_port() {
+            local host=$1
+            local port=$2
+            local retries=60
+            for i in $(seq 1 $retries); do
+              if nc -z $host $port; then
+                echo "Port $port is open!"
+                return 0
+              fi
+              echo "Waiting for port $port... ($i/$retries)"
+              sleep 5
+            done
+            return 1
+          }
+          
+          wait_for_port localhost 50000
+          
+          # Even if port is open, DB2 needs time to initialize the database
+          echo "Waiting additional time for DB2 initialization..."
+          sleep 60
+
+      - name: Seed DB2 (Legacy System)
+        run: |
+          echo "Seeding DB2 with legacy data..."
+          docker run --network host --rm \
+            -v ${{ github.workspace }}/scripts:/scripts \
+            liquibase/liquibase:latest \
+            --url="jdbc:db2://localhost:50000/${{ env.DB2_DB_NAME }}" \
+            --username=db2inst1 \
+            --password=${{ env.DB2_PASSWORD }} \
+            execute-sql \
+            --sql-file=/scripts/seed-db2.sql
+
+      - name: Generate Changelog from DB2
+        run: |
+          echo "Reverse engineering DB2 schema..."
+          docker run --network host --rm \
+            -v ${{ github.workspace }}/changelogs:/liquibase/changelogs \
+            liquibase/liquibase:latest \
+            --url="jdbc:db2://localhost:50000/${{ env.DB2_DB_NAME }}" \
+            --username=db2inst1 \
+            --password=${{ env.DB2_PASSWORD }} \
+            --changeLogFile=/liquibase/changelogs/db2-legacy.xml \
+            generate-changelog
+
+          echo "Generated Changelog Content:"
+          cat ${{ github.workspace }}/changelogs/db2-legacy.xml
+
+      - name: Sanitize Changelog for Postgres (RDS)
+        run: |
+          # DB2 often adds schemaName="DB2INST1". Postgres uses "public" by default.
+          # We remove schemaName attributes to let it use the default connection schema.
+          # We also remove catalogName
+          
+          echo "Sanitizing changelog for portability..."
+          # Note: Using generic replacements. In production, consider XSLT or more robust parsing.
+          sed -i 's/schemaName="DB2INST1"//g' ${{ github.workspace }}/changelogs/db2-legacy.xml
+          sed -i 's/catalogName="TESTDB"//g' ${{ github.workspace }}/changelogs/db2-legacy.xml
+          
+          # Verify clean file
+          cat ${{ github.workspace }}/changelogs/db2-legacy.xml
+
+      - name: Deploy to RDS (PostgreSQL)
+        run: |
+          echo "Deploying schema to simulated RDS (Postgres)..."
+          docker run --network host --rm \
+            -v ${{ github.workspace }}/changelogs:/liquibase/changelogs \
+            liquibase/liquibase:latest \
+            --url="jdbc:postgresql://localhost:5432/${{ env.POSTGRES_DB }}" \
+            --username=${{ env.POSTGRES_USER }} \
+            --password=${{ env.POSTGRES_PASSWORD }} \
+            --changeLogFile=/liquibase/changelogs/db2-legacy.xml \
+            update
+
+      - name: Verify Migration
+        run: |
+          echo "Verifying tables in Postgres..."
+          # Set PGPASSWORD to avoid prompt
+          export PGPASSWORD=${{ env.POSTGRES_PASSWORD }}
+          
+          docker run --network host --rm \
+            -e PGPASSWORD=${{ env.POSTGRES_PASSWORD }} \
+            postgres:15 \
+            psql -h localhost -U ${{ env.POSTGRES_USER }} -d ${{ env.POSTGRES_DB }} -c "\dt"

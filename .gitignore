@@ -1,0 +1,10 @@
+# Defaults
+.DS_Store
+.idea/
+*.log
+# Liquibase generated files (unless we want to commit them)
+changelogs/generated/
+# Docker volume data
+db_data/
+# Environment files
+.env
