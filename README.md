@@ -36,7 +36,7 @@ You can also run this simulation on your local machine if you have Docker instal
     *You can adjust the passwords in `.env` if desired.*
 
 2.  **Download Drivers**:
-    The DB2 driver is not included in the default Liquibase image due to licensing. Download it using the provided script:
+    Because we mount a custom drivers directory, we need to download both the DB2 driver AND the PostgreSQL driver into it. Run:
     ```bash
     ./scripts/download-driver.sh
     ```

@@ -16,4 +16,16 @@ else
     echo "Download complete."
 fi
 
-chmod 644 "$OUTPUT_FILE"
+# Download PostgreSQL JDBC Driver
+PG_DRIVER_URL="https://jdbc.postgresql.org/download/postgresql-42.6.0.jar"
+PG_OUTPUT_FILE="drivers/postgresql.jar"
+
+if [ -f "$PG_OUTPUT_FILE" ]; then
+    echo "Postgres driver already exists at $PG_OUTPUT_FILE"
+else
+    echo "Downloading Postgres JDBC driver..."
+    curl -o "$PG_OUTPUT_FILE" "$PG_DRIVER_URL"
+    echo "Download complete."
+fi
+
+chmod 644 drivers/*.jar
